@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# noisebridge-baron
+# noisebridge-baron sudoroom style
 #
 # Interfaces with the pay phone keypad at the entrance to Noisebridge,
 # opening the gate for those who know one of the entry codes.  Requires
@@ -10,6 +10,7 @@
 #   davidme
 #   jesse
 #   mct
+#   notconfusing
 
 import urllib, urllib2, json
 import logging
@@ -42,7 +43,7 @@ def open_serial(filename):
         raise
 
 last_mtime = 0
-def load_codes(filename=None):
+def load_codes(filename='codes.txt'):
     """
     Loads a list of valid access codes from the specified filename.  Lines
     starting with '#' are comments.  All other lines must contain numeric codes
@@ -84,27 +85,12 @@ def load_codes(filename=None):
         logging.error("Error loading %s: %s: %s" % (filename, type(e), str(e)))
         raise
 
-def open_gate(endpoint='http://api.noisebridge.net/gate/', command={'open':1}):
+def open_gate():
     """
-    Uses the Noisebridge API to open the front gate.
+    calls the opendoor.py file
     """
-    try:
-        results = urllib2.urlopen(endpoint, urllib.urlencode(command)).read()
-        results = json.loads(results)
-    except urllib2.HTTPError, e:
-        logging.error("error: HTTP Error %s when calling <%s>: %s" % (endpoint, e.code, e.read()))
-        return False
-    except urllib2.URLError, e:
-        logging.error("error: Could not reach <%s> data is %s" % (endpoint, e.args))
-        return False
-    except ValueError:
-        logging.error("error: Could not decode JSON from <%s>: %r" % results)
-        return False
-
-    if results.get('open', False):
-        return True
-    else:
-        return False
+    os.system("python opendoor.py")
+    
 
 def check_code(code, reload_codes=True):
     global codes
@@ -191,8 +177,59 @@ def door_loop():
 
         except Exception as e:
             logging.error("Keypad error: %s: %s" % (type(e), str(e)))
+            
+def door_loop4():
+    '''
+    Original door loop has start and stop sequences.
+    This works on the assumption that the codes are 4 chars long.
+    '''
+    global keypad
+
+    # Specify a timeout with pyserial, to have read() return after N seconds
+    # with no input.  If the keypad is idle for this long, we'll detect it by
+    # reading zero bytes, and clear the input buffer.
+    keypad.timeout = 10
+
+    input_buffer = ""
+
+    while True:
+        try:
+            char = keypad.read(1)
+
+            if not char:
+                logging.debug("Keypad read timeout, flushing input buffer")
+                input_buffer = ""
+                continue
+
+            if promiscuous:
+                logging.info("Opening door in promiscuous mode")
+                open_gate()
+                continue
+
+            if char == "*":
+                logging.debug("Read character %s, flushing input buffer", repr(char))
+                input_buffer = ""
+
+            elif char == "#":
+                if not input_buffer:
+                    logging.debug("Read character %s, but ignoring empty code", repr(char))
+                else:
+                    logging.debug("Read character %s, checking code", repr(char))
+                    check_code(input_buffer)
+                input_buffer = ""
+
+            elif char.isdigit():
+                logging.debug("Read character %s", repr(char))
+                input_buffer += char
+
+            else:
+                logging.debug("Ignoring non-digit character: %s" % repr(char))
+
+        except Exception as e:
+            logging.error("Keypad error: %s: %s" % (type(e), str(e)))
 
 if __name__ == "__main__":
+    open_gate()
     parser = argparse.ArgumentParser()
     parser.add_argument("--port",       required=True,          help="Serial port")
     parser.add_argument("--codefile",   required=True,          help="File containing list of valid access codes")
